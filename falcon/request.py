@@ -18,6 +18,19 @@ limitations under the License.
 
 from datetime import datetime
 
+try:
+    # NOTE(kgrifs): In Python 2.6 and 2.7, socket._fileobject is a
+    # standard way of exposing a socket as a file-like object, and
+    # is used by wsgiref for wsgi.input.
+    import socket
+    NativeStream = socket._fileobject
+except AttributeError:  # pragma nocover
+    # NOTE(kgriffs): In Python 3.3, wsgiref implements wsgi.input
+    # using _io.BufferedReader which is an alias of io.BufferedReader
+    import io
+    NativeStream = io.BufferedReader
+
+import mimeparse
 import six
 
 from falcon.exceptions import HTTPBadRequest
@@ -80,7 +93,6 @@ class Request(object):
 
         self._wsgierrors = env['wsgi.errors']
         self.stream = env['wsgi.input']
-
         self.method = env['REQUEST_METHOD']
 
         # Normalize path
@@ -108,6 +120,14 @@ class Request(object):
 
         self._headers = helpers.parse_headers(env)
 
+        # NOTE(kgriffs): Wrap wsgi.input if needed to make read() more robust,
+        # normalizing semantics between, e.g., gunicorn and wsgiref.
+        if isinstance(self.stream, NativeStream):  # pragma: nocover
+            # NOTE(kgriffs): coverage can't detect that this *is* actually
+            # covered since the test that does so uses multiprocessing.
+            self.stream = helpers.Body(self.stream, self.content_length)
+
+    # TODO(kgriffs): Use the nocover pragma only for the six.PY3 if..else
     def log_error(self, message):  # pragma: no cover
         """Log an error to wsgi.error
 
@@ -152,16 +172,60 @@ class Request(object):
         return self.client_accepts('application/xml')
 
     def client_accepts(self, media_type):
-        """Return True if the Accept header indicates a media type support."""
+        """Returns the client's preferred media type.
 
-        accept = self._get_header_by_wsgi_name('ACCEPT')
-        return ((accept is not None) and
-                ((media_type in accept) or ('*/*' in accept)))
+        Args:
+            media_type: Media type to check
+
+        Returns:
+            True IFF the client has indicated in the Accept header that
+            they accept at least one of the specified media types.
+        """
+
+        accept = self.accept
+
+        # PERF(kgriffs): Usually the following will be true, so
+        # try it first.
+        if (accept == media_type) or (accept == '*/*'):
+            return True
+
+        # Fall back to full-blown parsing
+        try:
+            return mimeparse.quality(media_type, accept) != 0.0
+        except ValueError:
+            return False
+
+    def client_prefers(self, media_types):
+        """Returns the client's preferred media type given several choices.
+
+        Args:
+            media_types: One or more media types from which to choose the
+                client's preferred type. This value MUST be an iterable
+                collection of strings.
+
+        Returns:
+            The client's preferred media type, based on the Accept header,
+            or None if the client does not accept any of the specified
+            types.
+        """
+
+        try:
+            # NOTE(kgriffs): best_match will return '' if no match is found
+            preferred_type = mimeparse.best_match(media_types, self.accept)
+        except ValueError:
+            # Value for the accept header was not formatted correctly
+            preferred_type = ''
+
+        return (preferred_type if preferred_type else None)
 
     @property
     def accept(self):
-        """Value of the Accept header, or None if not found."""
-        return self._get_header_by_wsgi_name('ACCEPT')
+        """Value of the Accept header, or */* if not found per RFC."""
+        accept = self._get_header_by_wsgi_name('ACCEPT')
+
+        # NOTE(kgriffs): Per RFC, missing accept header is
+        # equivalent to '*/*'
+        return '*/*' if accept is None else accept
 
     @property
     def app(self):
@@ -549,7 +613,9 @@ class Request(object):
             name: Parameter name, case-sensitive (e.g., 'limit')
             transform: An optional transform function that takes as input
                 each element in the list as a string and outputs a transformed
-                element for inclusion in the list that will be returned.
+                element for inclusion in the list that will be returned. For
+                example, passing the int function will transform list items
+                into numbers.
             required: Set to True to raise HTTPBadRequest instead of returning
                 gracefully when the parameter is not found or is not an
                 integer (default False)
@@ -558,21 +624,43 @@ class Request(object):
 
         Returns:
             The value of the param if it is found. Otherwise, returns None
-            unless required is True.
+            unless required is True. for partial lists, None will be returned
+            as a placeholder. For example:
+
+                things=1,,3
+
+            would be returned as:
+
+                ['1', None, '3']
+
+            while this:
+
+                things=,,,
+
+            would just be retured as:
+
+                [None, None, None, None]
 
         Raises
             HTTPBadRequest: The param was not found in the request, but was
                 required.
-
         """
 
         # PERF: Use if..in since it is a good all-around performer; we don't
         #       know how likely params are to be specified by clients.
         if name in self._params:
             items = self._params[name].split(',')
-            if transform is not None:
+
+            # PERF(kgriffs): Use if-else rather than a DRY approach
+            # that sets transform to a passthrough function; avoids
+            # function calling overhead.
+            if transform is None:
+                items = [i if i != '' else None
+                         for i in items]
+            else:
                 try:
-                    items = [transform(x) for x in items]
+                    items = [transform(i) if i != '' else None
+                             for i in items]
                 except ValueError:
                     desc = ('The value of the "' + name + '" query parameter '
                             'is not formatted correctly.')
