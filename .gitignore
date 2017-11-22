@@ -1,32 +1,41 @@
-*.py[cod]
-
 # C extensions
 *.c
 *.so
 
-# Packages
+# Jython
+*$py.class
+
+# Build artifacts
 *.egg
 *.egg-info
-dist
-build
-eggs
-parts
-var
-sdist
-develop-eggs
+*.py[cod]
+.eggs
 .installed.cfg
+build
+develop-eggs
+dist
+eggs
 lib
 lib64
+parts
+sdist
+var
 
 # Installer logs
 pip-log.txt
 
-# Unit test / coverage reports
-.coverage
-.tox
-nosetests.xml
-htmlcov
+# Test artifacts
 *.dat
+.cache
+.coverage
+.coverage_*
+.ecosystem
+.tox
+htmlcov
+nosetests.xml
+
+# Docs
+docs/_build
 
 # Translations
 *.mo
@@ -42,3 +51,7 @@ htmlcov
 
 # VIM temp files
 *~
+
+# VSCode
+
+.vscode

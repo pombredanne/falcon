@@ -1,17 +1,84 @@
 language: python
-python:
-  - 2.6
-  - 2.7
-  - 3.3
-  - pypy
-install:
-  - pip install -r tools/test-requires --use-mirrors
-  - pip install coveralls
-  - python setup.py install
-script: nosetests
-after_success: coveralls
+sudo: false
+install: tools/travis/install.sh
+cache:
+    directories:
+        - $HOME/.cache/pip
+
+matrix:
+    include:
+        # TODO(kgriffs): Uncomment when Travis no longer stalls and
+        # errors out on Jython tests.
+        # - python: 2.7
+        #   env: JYTHON=true
+        - python: pypy-5.4
+          env: TOXENV=pypy
+        # TODO(kgriffs): Uncomment when pypy3 is more mature
+        # - python: pypy3
+        #   env: TOXENV=pypy3
+        - python: 2.7
+          env: TOXENV=pep8
+        - python: 2.7
+          env: TOXENV=pep8-examples
+        - python: 2.6
+          env: TOXENV=py26
+        - python: 2.7
+          env: TOXENV=py27
+        - python: 2.7
+          env: TOXENV=py27_ujson
+        - python: 2.7
+          env: TOXENV=py27_smoke
+        - python: 2.7
+          env: TOXENV=py27_cython
+        - python: 2.7
+          env: TOXENV=py27_smoke_cython
+        - python: 3.3
+          env: TOXENV=py33
+        - python: 3.3
+          env: TOXENV=py33_cython
+        - python: 3.4
+          env: TOXENV=py34
+        - python: 3.4
+          env: TOXENV=py34_cython
+        - python: 3.5
+          env: TOXENV=py35
+        - python: 3.5
+          env: TOXENV=py35_ujson
+        - python: 3.5
+          env: TOXENV=py35_cython
+        - python: 3.6
+          env: TOXENV=py36
+        - python: 3.6
+          env: TOXENV=py36_ujson
+        - python: 3.6
+          env: TOXENV=py36_cython
+        - python: 3.6
+          env: TOXENV=py36_smoke
+        - python: 3.6
+          env: TOXENV=py36_smoke_cython
+        - python: 2.7
+          env: TOXENV=docs
+        - python: 3.6
+          env: TOXENV=hug
+
+script: tools/travis/run_tests.sh
 notifications:
-  email:
-    - kurt.griffiths@rackspace.com
   irc:
-    - "chat.freenode.net#falconframework"
+    channels:
+      - "chat.freenode.net#falconframework"
+    on_success: change
+    on_failure: always
+    use_notice: true
+    skip_join: true
+  webhooks:
+    urls:
+      secure: "R4Hr754P2v69tWoy6vKz/4csb6ZHYRM/+8vTVV6ioDWyqsPqyGXAPiXDfZ617C7TLxJiTlbFIJPjlcH64estPg+RZ1NA4D8BrDKS2nKqHJ2Z5Jv6X5Ds6HkEUNnYXsuwsqNvZzhpPRcCKXXRpvmAbkNUSe8ftn4kz2zCOA9MBSY="
+    on_success: change
+    on_failure: always
+
+before_install:
+  - pip install codecov
+
+after_success:
+  - coverage combine .coverage_data
+  - codecov
